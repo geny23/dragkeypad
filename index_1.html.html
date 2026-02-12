@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Drag Keypad Demo (Inline Guides)</title>
+  <style>
+    :root{
+      --gap: 12px;
+      --cell-min: 88px;
+      --cell-max: 130px;
+      --cell-size: clamp(var(--cell-min), 26vw, var(--cell-max));
+      --radius: 18px;
+    }
+
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", sans-serif;
+      background:#fafafa; color:#111;
+      display:flex; justify-content:center;
+      padding:18px;
+    }
+
+    .card{
+      width:min(560px, 100%);
+      background:#fff;
+      border-radius:22px;
+      box-shadow:0 16px 40px rgba(0,0,0,.10);
+      padding:16px;
+    }
+
+    .title{ font-weight:900; font-size:18px; }
+    .help{
+      margin-top:8px; font-size:13px; color:#555; line-height:1.45;
+    }
+
+    .output{
+      margin-top:12px;
+      min-height:90px;
+      border:1px solid #e3e3e3;
+      border-radius:16px;
+      padding:12px;
+      background:#fcfcfc;
+      font-size:18px;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+
+    .grid{
+      margin-top:14px;
+      display:grid;
+      grid-template-columns: repeat(3, var(--cell-size));
+      justify-content:center;
+      gap: var(--gap);
+    }
+
+    .cell{
+      width: var(--cell-size);
+      height: var(--cell-size);
+      border-radius: var(--radius);
+      border:1px solid #d6d6d6;
+      background:#fff;
+      box-shadow:0 6px 18px rgba(0,0,0,.08);
+      position:relative;
+      user-select:none;
+      touch-action:none; /* 모바일에서도 드래그 테스트 가능 */
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight:900;
+      font-size:26px;
+    }
+
+    .cell.active{
+      border:2px solid #111;
+      background:#f2f2f2;
+      box-shadow:0 10px 25px rgba(0,0,0,.18);
+    }
+
+    /* ✅ 버튼 내부 가이드(상/하/좌/우) */
+    .guide{
+      position:absolute;
+      font-size:14px;
+      font-weight:900;
+      color:#666;
+      line-height:1;
+      pointer-events:none;
+      opacity:.95;
+    }
+    .guide.up{ top:10px; left:50%; transform:translateX(-50%); }
+    .guide.down{ bottom:10px; left:50%; transform:translateX(-50%); }
+    .guide.left{ left:10px; top:50%; transform:translateY(-50%); }
+    .guide.right{ right:10px; top:50%; transform:translateY(-50%); }
+
+    /* ✅ 현재 드래그 방향 강조 */
+    .guide.sel{
+      color:#111;
+      background: rgba(0,0,0,0.08);
+      padding:4px 7px;
+      border-radius:999px;
+    }
+
+    /* 기본값(가운데) */
+    .base{
+      font-size:26px;
+      font-weight:900;
+      color:#111;
+      pointer-events:none;
+    }
+
+    .btnrow{
+      display:flex;
+      gap:10px;
+      margin-top:12px;
+    }
+
+    button{
+      flex:1;
+      padding:12px 14px;
+      border-radius:16px;
+      border:1px solid #e3e3e3;
+      background:#fff;
+      font-weight:900;
+      cursor:pointer;
+    }
+
+    .topbar{
+      margin-top:10px;
+      display:flex; justify-content:space-between; align-items:center;
+      gap:10px;
+      font-size:13px; color:#555;
+    }
+    .pill{
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid #e3e3e3;
+      font-weight:900;
+      background:#fff;
+      color:#111;
+      user-select:none;
+    }
+    .pill.on{
+      background:#111; color:#fff; border-color:#111;
+    }
+
+    @media (max-width: 360px){
+      .guide{ font-size:13px; }
+      .base{ font-size:24px; }
+    }
+  </style>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <div class="card">
+    <div class="title">영문 입력 (드래그 키패드 데모) — 버튼 내부 가이드</div>
+    <div class="help">
+      버튼을 누른 채로 ↑ ↓ ← → 드래그 후 떼면 해당 방향의 글자가 입력됩니다.
+      드래그 없이 떼면 가운데 기본값이 입력됩니다.
+      (PC는 마우스로 누른 채 드래그)
+    </div>
+
+    <div class="topbar">
+      <div>가이드는 항상 버튼 내부에 표시됩니다(오버레이 없음).</div>
+      <div id="shiftPill" class="pill">SHIFT: OFF</div>
+    </div>
+
+    <div id="output" class="output">여기에 입력 결과가 표시됩니다…</div>
+
+    <div id="grid" class="grid"></div>
+
+    <div class="btnrow">
+      <button id="clear">전체 지우기</button>
+      <button id="newline">줄바꿈</button>
+    </div>
+  </div>
+
+<script>
+  const DRAG_THRESHOLD = 18;
+
+  // ✅ 9개 버튼 매핑 (필요하면 여기만 수정)
+  const KEYS = [
+    // Row 1
+    { id: 1, base: "A", up:"B", right:"C", down:"D", left:"E" }, // 요청하신 1번
+    { id: 2, base: "F", up:"G", right:"H", down:"I", left:"J" },
+    { id: 3, base: "K", up:"L", right:"M", down:"N", left:"O" },
+
+    // Row 2
+    { id: 4, base: "P", up:"Q", right:"R", down:"S", left:"T" },
+    { id: 5, base: "V", up:"U", right:"W", down:"X", left:"Y" },
+    { id: 6, base: "Z", up:".", right:"?", down:"!", left:"," },
+
+    // Row 3 (예시 기능키)
+    { id: 7, base: "⇧", up:"⇧", right:"⇧", down:"⇧", left:"⇧", type:"shift" },
+    { id: 8, base: "␣", up:"␣", right:"␣", down:"␣", left:"␣", type:"space" },
+    { id: 9, base: "⌫", up:"⌫", right:"⌫", down:"⌫", left:"⌫", type:"backspace" },
+  ];
+
+  const grid = document.getElementById("grid");
+  const outputEl = document.getElementById("output");
+  const clearBtn = document.getElementById("clear");
+  const newlineBtn = document.getElementById("newline");
+  const shiftPill = document.getElementById("shiftPill");
+
+  let text = "";
+  let shift = false;
+
+  let active = null;     // { keyDef, cell }
+  let activeDir = "base";
+  let pointerId = null;
+  let start = { x:0, y:0 };
+
+  function renderOutput(){
+    outputEl.textContent = text || "여기에 입력 결과가 표시됩니다…";
+  }
+
+  function renderShift(){
+    shiftPill.textContent = `SHIFT: ${shift ? "ON" : "OFF"}`;
+    shiftPill.classList.toggle("on", !!shift);
+  }
+
+  function dirFromDelta(dx, dy){
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    if (adx < DRAG_THRESHOLD && ady < DRAG_THRESHOLD) return "base";
+    if (adx >= ady) return dx > 0 ? "right" : "left";
+    return dy > 0 ? "down" : "up";
+  }
+
+  function commit(keyDef, dir){
+    if (!keyDef) return;
+
+    if (keyDef.type === "space"){
+      text += " ";
+      renderOutput();
+      return;
+    }
+    if (keyDef.type === "backspace"){
+      text = text.slice(0, -1);
+      renderOutput();
+      return;
+    }
+    if (keyDef.type === "shift"){
+      shift = !shift;
+      renderShift();
+      return;
+    }
+
+    const ch = (dir === "up") ? keyDef.up
+             : (dir === "right") ? keyDef.right
+             : (dir === "down") ? keyDef.down
+             : (dir === "left") ? keyDef.left
+             : keyDef.base;
+
+    text += shift ? String(ch).toUpperCase() : String(ch).toLowerCase();
+
+    // 한 글자 입력 후 shift 해제(유지하고 싶으면 아래 2줄 삭제)
+    if (shift){
+      shift = false;
+      renderShift();
+    }
+
+    renderOutput();
+  }
+
+  function clearSelectionStyles(){
+    [...grid.children].forEach(cell=>{
+      cell.classList.remove("active");
+      cell.querySelectorAll(".guide").forEach(g=>g.classList.remove("sel"));
+    });
+  }
+
+  function updateGuideSelection(cell){
+    cell.querySelectorAll(".guide").forEach(g=>g.classList.remove("sel"));
+    if (activeDir === "up") cell.querySelector(".guide.up")?.classList.add("sel");
+    if (activeDir === "right") cell.querySelector(".guide.right")?.classList.add("sel");
+    if (activeDir === "down") cell.querySelector(".guide.down")?.classList.add("sel");
+    if (activeDir === "left") cell.querySelector(".guide.left")?.classList.add("sel");
+    // base면 아무것도 강조 안 함
+  }
+
+  function makeCell(keyDef){
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.dataset.keyId = keyDef.id;
+
+    // 내부 가이드(상/우/하/좌)
+    const gUp = document.createElement("div");
+    gUp.className = "guide up";
+    gUp.textContent = keyDef.up;
+
+    const gRight = document.createElement("div");
+    gRight.className = "guide right";
+    gRight.textContent = keyDef.right;
+
+    const gDown = document.createElement("div");
+    gDown.className = "guide down";
+    gDown.textContent = keyDef.down;
+
+    const gLeft = document.createElement("div");
+    gLeft.className = "guide left";
+    gLeft.textContent = keyDef.left;
+
+    const base = document.createElement("div");
+    base.className = "base";
+    base.textContent = keyDef.base;
+
+    cell.appendChild(gUp);
+    cell.appendChild(gRight);
+    cell.appendChild(gDown);
+    cell.appendChild(gLeft);
+    cell.appendChild(base);
+
+    // 입력 이벤트
+    cell.addEventListener("pointerdown", (e)=>{
+      cell.setPointerCapture?.(e.pointerId);
+      pointerId = e.pointerId;
+
+      start = { x: e.clientX, y: e.clientY };
+      active = { keyDef, cell };
+      activeDir = "base";
+
+      clearSelectionStyles();
+      cell.classList.add("active");
+      updateGuideSelection(cell);
+    });
+
+    cell.addEventListener("pointermove", (e)=>{
+      if (pointerId == null || e.pointerId !== pointerId || !active) return;
+
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+
+      const dir = dirFromDelta(dx, dy);
+      activeDir = (dir === "base") ? "base" : dir;
+
+      updateGuideSelection(active.cell);
+    });
+
+    const end = (e)=>{
+      if (pointerId == null || e.pointerId !== pointerId || !active) return;
+
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      const dir = dirFromDelta(dx, dy);
+
+      commit(active.keyDef, dir);
+
+      pointerId = null;
+      active = null;
+      activeDir = "base";
+      clearSelectionStyles();
+    };
+
+    cell.addEventListener("pointerup", end);
+    cell.addEventListener("pointercancel", end);
+
+    return cell;
+  }
+
+  KEYS.forEach(k => grid.appendChild(makeCell(k)));
+
+  clearBtn.addEventListener("click", ()=>{
+    text = "";
+    renderOutput();
+  });
+
+  newlineBtn.addEventListener("click", ()=>{
+    text += "\n";
+    renderOutput();
+  });
+
+  renderOutput();
+  renderShift();
+</script>
+</body>
+</html>
